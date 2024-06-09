@@ -12,11 +12,16 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// Write JSON
+
 func WriteJSON(w http.ResponseWriter, status int, v any) error {
 	w.WriteHeader(status)
 	w.Header().Set("Content-Type", "application/json")
+
 	return json.NewEncoder(w).Encode(v)
 }
+
+// Create JWT Token
 
 func createJWT(account *Account) (string, error) {
 	claims := &jwt.MapClaims{
@@ -26,25 +31,56 @@ func createJWT(account *Account) (string, error) {
 	secret := os.Getenv("JWT_SECRET")
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
-	return token.SignedString(secret)
+	return token.SignedString([]byte(secret))
+}
+
+func permissionDenied(w http.ResponseWriter) {
+	WriteJSON(w, http.StatusForbidden, ApiError{Error: "Permission denied"})
 }
 
 // JWT Authorization
 
-func withJWTAuth(handlerFunc http.HandlerFunc) http.HandlerFunc {
+func withJWTAuth(handlerFunc http.HandlerFunc, s Storage) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("Calling JWT auth middleware")
 
 		tokenString := r.Header.Get("x-jwt-token")
 
-		_, err := validateJWT(tokenString)
+		token, err := validateJWT(tokenString)
+
+		if err != nil {
+			permissionDenied(w)
+			return
+		}
+		if !token.Valid {
+			permissionDenied(w)
+			return
+		}
+
+		userID, err := getID(r)
+		if err != nil {
+			permissionDenied(w)
+			return
+		}
+
+		account, err := s.GetAccountByID(userID)
+		if err != nil {
+			permissionDenied(w)
+			return
+		}
+
+		claims := token.Claims.(jwt.MapClaims)
+
+		if account.Number != int64(claims["accountNumber"].(float64)) {
+			permissionDenied(w)
+			return
+		}
 
 		if err != nil {
 			WriteJSON(w, http.StatusForbidden, ApiError{Error: "invalid token"})
 			return
 		}
-
 		handlerFunc(w, r)
 	}
 }
@@ -54,14 +90,12 @@ func withJWTAuth(handlerFunc http.HandlerFunc) http.HandlerFunc {
 const jwtSecret = "golang2024"
 
 func validateJWT(tokenString string) (*jwt.Token, error) {
+
 	secret := os.Getenv("JWT_SECRET")
 	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Don't forget to validate the alg is what you expect:
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
 		}
-
-		// hmacSampleSecret is a []byte containing your secret, e.g. []byte("my_secret_key")
 		return []byte(secret), nil
 	})
 
@@ -92,8 +126,9 @@ func NewAPIServer(listenAddr string, store Storage) *APIServer {
 func (s *APIServer) Run() {
 	router := mux.NewRouter()
 
+	router.HandleFunc("/login", makeHTTPHandleFunc(s.handleLogin))
 	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccount))
-	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandleFunc(s.handleGetAccountbyID)))
+	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandleFunc(s.handleGetAccountbyID), s.store))
 	router.HandleFunc("/account/{id}", makeHTTPHandleFunc(s.handleDeleteAccount))
 	router.HandleFunc("/transfer", makeHTTPHandleFunc(s.handleTransfer))
 
@@ -113,6 +148,12 @@ func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error 
 
 	return fmt.Errorf("method not allowed %s", r.Method)
 
+}
+
+// Handle login
+
+func (s *APIServer) handleLogin(w http.ResponseWriter, r *http.Request) error {
+	return nil
 }
 
 // Get all accounts
@@ -171,6 +212,8 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return err
 	}
+
+	fmt.Println("JWT Token", tokenString)
 
 	return WriteJSON(w, http.StatusOK, account)
 
