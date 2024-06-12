@@ -26,7 +26,7 @@ func main() {
 
 	store := NewStore()
 	service := NewService(store)
-	NewGRPHandler(grpcServer)
+	NewGRPHandler(grpcServer, service)
 
 	log.Println("GRPC Server started at ", grpcAddr)
 
