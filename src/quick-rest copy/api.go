@@ -153,7 +153,14 @@ func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error 
 // Handle login
 
 func (s *APIServer) handleLogin(w http.ResponseWriter, r *http.Request) error {
-	return nil
+	if r.Method == "POST" {
+		return fmt.Errorf("method not allowed %s", r.Method)
+	}
+	var req LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return err
+	}
+	return WriteJSON(w, http.StatusOK, req)
 }
 
 // Get all accounts
@@ -198,12 +205,12 @@ func (s *APIServer) handleGetAccountbyID(w http.ResponseWriter, r *http.Request)
 // Creating account
 
 func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) error {
-	createAccountReq := new(CreateAccountRequest)
-	if err := json.NewDecoder(r.Body).Decode(createAccountReq); err != nil {
+	req := new(CreateAccountRequest)
+	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 		return err
 	}
 
-	account := NewAccount(createAccountReq.FirstName, createAccountReq.LastName)
+	account, err := NewAccount(req.FirstName, req.LastName, req.Password)
 	if err := s.store.CreateAccount(account); err != nil {
 		return err
 	}
