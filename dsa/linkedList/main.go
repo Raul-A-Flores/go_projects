@@ -6,6 +6,10 @@ type node struct {
 }
 
 type linkedList struct {
-	data node
-	next
+	head   *node
+	length int
+}
+
+func (l *linkedList) prepend(n *node) {
+
 }
